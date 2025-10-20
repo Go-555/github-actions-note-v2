@@ -76,16 +76,16 @@ jobs:
             fi
           fi
 
-      - name: Install Playwright
+      - name: Install dependencies
         run: |
-          npm install playwright
+          npm install
           npx playwright install chromium
           npx playwright install-deps chromium
           echo "✅ Playwright installed"
 
       - name: Create posting script
         run: |
-          cat > /tmp/post-script.mjs << 'EOFSCRIPT'
+          cat > ./post-script.mjs << 'EOFSCRIPT'
           import { chromium } from 'playwright';
           import fs from 'fs';
           import path from 'path';
@@ -356,7 +356,7 @@ jobs:
           export THUMBNAIL_PATH="${{ env.THUMBNAIL_PATH }}"
           export POST_TYPE="${{ github.event.inputs.post_type }}"
           
-          node /tmp/post-script.mjs
+          node ./post-script.mjs
 
       - name: Summary
         if: always()
