@@ -23,6 +23,7 @@ on:
 jobs:
   post-to-note:
     runs-on: ubuntu-latest
+    container: mcr.microsoft.com/playwright:v1.56.1-jammy
     timeout-minutes: 15
     
     steps:
@@ -78,9 +79,8 @@ jobs:
 
       - name: Install minimal deps
         run: |
-          npm i playwright
-          npx playwright install --with-deps chromium | cat
-          echo "✅ Playwright ready"
+          npm i playwright@1.56.1
+          echo "✅ Playwright runtime ready (using preinstalled browsers in container)"
 
       - name: Create posting script
         run: |
