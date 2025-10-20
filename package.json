@@ -1,0 +1,23 @@
+{
+  "name": "mugi-note-publisher",
+  "version": "1.0.0",
+  "description": "note.com auto publisher with GitHub Actions",
+  "type": "module",
+  "scripts": {
+    "login": "node src/login-note.js",
+    "install-browser": "npx playwright install chromium && npx playwright install-deps chromium"
+  },
+  "keywords": [
+    "note",
+    "note.com",
+    "automation",
+    "github-actions",
+    "playwright"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  }
+}
+

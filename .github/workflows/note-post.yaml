@@ -1,0 +1,377 @@
+name: Note Post via MCP
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_folder:
+        description: '投稿するnote配下のフォルダ名 (例: exsample)'
+        required: true
+        type: string
+      post_type:
+        description: '投稿タイプ'
+        required: true
+        type: choice
+        options:
+          - draft
+          - publish
+        default: draft
+      thumbnail_name:
+        description: 'サムネイル画像ファイル名（フォルダ内の画像、例: sample-thumbnail.png）'
+        required: false
+        type: string
+
+jobs:
+  post-to-note:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate target folder
+        run: |
+          TARGET_PATH="note/${{ github.event.inputs.target_folder }}"
+          if [ ! -d "$TARGET_PATH" ]; then
+            echo "❌ Error: Folder $TARGET_PATH does not exist"
+            exit 1
+          fi
+          
+          # mdファイルを探す
+          MD_FILE=$(find "$TARGET_PATH" -maxdepth 1 -name "*.md" -type f | head -n 1)
+          if [ -z "$MD_FILE" ]; then
+            echo "❌ Error: No markdown file found in $TARGET_PATH"
+            exit 1
+          fi
+          
+          echo "✅ Found markdown file: $MD_FILE"
+          echo "MD_FILE=$MD_FILE" >> $GITHUB_ENV
+          echo "TARGET_PATH=$TARGET_PATH" >> $GITHUB_ENV
+
+      - name: Setup authentication state
+        run: |
+          echo '${{ secrets.NOTE_STATE_JSON }}' > ~/.note-state.json
+          if [ ! -s ~/.note-state.json ]; then
+            echo "❌ Error: NOTE_STATE_JSON secret is empty"
+            echo "Please set NOTE_STATE_JSON secret in repository settings"
+            echo "Run 'npm run login' locally to generate the state file"
+            exit 1
+          fi
+          echo "✅ Authentication state file created"
+
+      - name: Determine thumbnail path
+        run: |
+          if [ -n "${{ github.event.inputs.thumbnail_name }}" ]; then
+            THUMBNAIL_PATH="${{ env.TARGET_PATH }}/${{ github.event.inputs.thumbnail_name }}"
+            if [ -f "$THUMBNAIL_PATH" ]; then
+              echo "THUMBNAIL_PATH=$THUMBNAIL_PATH" >> $GITHUB_ENV
+              echo "✅ Using thumbnail: $THUMBNAIL_PATH"
+            else
+              echo "⚠️  Warning: Specified thumbnail not found: $THUMBNAIL_PATH"
+            fi
+          fi
+
+      - name: Install Playwright
+        run: |
+          npm install playwright
+          npx playwright install chromium
+          npx playwright install-deps chromium
+          echo "✅ Playwright installed"
+
+      - name: Create posting script
+        run: |
+          cat > /tmp/post-script.mjs << 'EOFSCRIPT'
+          import { chromium } from 'playwright';
+          import fs from 'fs';
+          import path from 'path';
+
+          // parseMarkdown関数
+          function parseMarkdown(content) {
+            const lines = content.split('\n');
+            let title = '';
+            let body = '';
+            const tags = [];
+            let inFrontMatter = false;
+            let frontMatterEnded = false;
+
+            for (let i = 0; i < lines.length; i++) {
+              const line = lines[i];
+
+              if (line.trim() === '---') {
+                if (!frontMatterEnded) {
+                  inFrontMatter = !inFrontMatter;
+                  if (!inFrontMatter) {
+                    frontMatterEnded = true;
+                  }
+                  continue;
+                }
+              }
+
+              if (inFrontMatter) {
+                if (line.startsWith('title:')) {
+                  title = line.substring(6).trim().replace(/^["']|["']$/g, '');
+                } else if (line.startsWith('tags:')) {
+                  const tagsStr = line.substring(5).trim();
+                  if (tagsStr.startsWith('[') && tagsStr.endsWith(']')) {
+                    tags.push(...tagsStr.slice(1, -1).split(',').map(t => t.trim().replace(/^["']|["']$/g, '')));
+                  }
+                } else if (line.trim().startsWith('-')) {
+                  const tag = line.trim().substring(1).trim().replace(/^["']|["']$/g, '');
+                  if (tag) tags.push(tag);
+                }
+                continue;
+              }
+
+              if (!title && line.startsWith('# ')) {
+                title = line.substring(2).trim();
+                continue;
+              }
+
+              if (frontMatterEnded || !line.trim().startsWith('---')) {
+                body += line + '\n';
+              }
+            }
+
+            return {
+              title: title || 'Untitled',
+              body: body.trim(),
+              tags: tags.filter(Boolean),
+            };
+          }
+
+          // 画像抽出関数
+          function extractImages(markdown, baseDir) {
+            const imageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+            const images = [];
+            let match;
+
+            while ((match = imageRegex.exec(markdown)) !== null) {
+              const alt = match[1] || 'image';
+              const imagePath = match[2];
+              
+              if (!imagePath.startsWith('http://') && !imagePath.startsWith('https://')) {
+                const absolutePath = path.resolve(baseDir, imagePath);
+                if (fs.existsSync(absolutePath)) {
+                  images.push({
+                    alt,
+                    localPath: imagePath,
+                    absolutePath,
+                    placeholder: match[0],
+                  });
+                }
+              }
+            }
+
+            return images;
+          }
+
+          // メイン処理
+          async function main() {
+            const markdownPath = process.env.MD_FILE;
+            const thumbnailPath = process.env.THUMBNAIL_PATH || '';
+            const isPublic = process.env.POST_TYPE === 'publish';
+            const statePath = path.join(process.env.HOME, '.note-state.json');
+
+            console.log('📝 Starting note.com post...');
+            console.log('  Markdown:', markdownPath);
+            console.log('  Thumbnail:', thumbnailPath || 'None');
+            console.log('  Type:', isPublic ? 'Publish' : 'Draft');
+
+            const mdContent = fs.readFileSync(markdownPath, 'utf-8');
+            const { title, body, tags } = parseMarkdown(mdContent);
+            const baseDir = path.dirname(markdownPath);
+            const images = extractImages(body, baseDir);
+
+            console.log('  Title:', title);
+            console.log('  Tags:', tags.join(', '));
+            console.log('  Images:', images.length);
+
+            const browser = await chromium.launch({
+              headless: true,
+              args: ['--lang=ja-JP', '--no-sandbox', '--disable-setuid-sandbox'],
+            });
+
+            const context = await browser.newContext({
+              storageState: statePath,
+              locale: 'ja-JP',
+              permissions: ['clipboard-read', 'clipboard-write'],
+            });
+
+            const page = await context.newPage();
+            page.setDefaultTimeout(180000);
+
+            await context.grantPermissions(['clipboard-read', 'clipboard-write'], { 
+              origin: 'https://editor.note.com' 
+            });
+
+            await page.goto('https://editor.note.com/new', { 
+              waitUntil: 'domcontentloaded',
+              timeout: 180000 
+            });
+            await page.waitForSelector('textarea[placeholder*="タイトル"]', { timeout: 180000 });
+
+            // サムネイル処理（簡略版）
+            if (thumbnailPath && fs.existsSync(thumbnailPath)) {
+              console.log('🖼️  Uploading thumbnail...');
+              try {
+                const addBtn = page.locator('button[aria-label="画像を追加"]').first();
+                await addBtn.waitFor({ state: 'visible', timeout: 10000 });
+                await addBtn.click();
+
+                const uploadBtn = page.locator('button:has-text("画像をアップロード")').first();
+                await uploadBtn.waitFor({ state: 'visible', timeout: 10000 });
+
+                const fileInput = page.locator('input[type="file"]').first();
+                await fileInput.setInputFiles(thumbnailPath);
+
+                await page.waitForTimeout(2000);
+
+                const dialog = page.locator('div[role="dialog"]');
+                const saveBtn = dialog.locator('button:has-text("保存")').first();
+                await saveBtn.waitFor({ state: 'visible', timeout: 10000 });
+                await page.waitForTimeout(1000);
+                await saveBtn.click();
+                await page.waitForTimeout(2000);
+
+                console.log('✅ Thumbnail uploaded');
+              } catch (err) {
+                console.log('⚠️  Thumbnail upload failed:', err.message);
+              }
+            }
+
+            // タイトル設定
+            await page.fill('textarea[placeholder*="タイトル"]', title);
+            console.log('✅ Title set');
+
+            // 本文設定（画像処理含む）
+            const bodyBox = page.locator('div[contenteditable="true"][role="textbox"]').first();
+            await bodyBox.waitFor({ state: 'visible' });
+            await bodyBox.click();
+
+            const lines = body.split('\n');
+            for (let i = 0; i < lines.length; i++) {
+              const line = lines[i];
+              
+              // 画像行の場合は画像をアップロード
+              const imageMatch = line.match(/!\[([^\]]*)\]\(([^)]+)\)/);
+              if (imageMatch) {
+                const imagePath = imageMatch[2];
+                const image = images.find(img => img.localPath === imagePath);
+                
+                if (image && fs.existsSync(image.absolutePath)) {
+                  console.log(`  Uploading image: ${image.localPath}`);
+                  
+                  // 画像をクリップボードにコピーしてペースト
+                  const imageBuffer = fs.readFileSync(image.absolutePath);
+                  const base64Image = imageBuffer.toString('base64');
+                  const mimeType = image.absolutePath.endsWith('.png') ? 'image/png' : 
+                                   image.absolutePath.endsWith('.jpg') || image.absolutePath.endsWith('.jpeg') ? 'image/jpeg' : 
+                                   'image/gif';
+                  
+                  await page.evaluate(async ({ base64, mime }) => {
+                    const blob = await fetch(`data:${mime};base64,${base64}`).then(r => r.blob());
+                    await navigator.clipboard.write([
+                      new ClipboardItem({ [mime]: blob })
+                    ]);
+                  }, { base64: base64Image, mime: mimeType });
+                  
+                  // ペースト
+                  await page.keyboard.press('Control+V');
+                  await page.waitForTimeout(1000);
+                  
+                  console.log(`  ✅ Image uploaded: ${image.localPath}`);
+                } else {
+                  // 画像ファイルが見つからない場合はテキストとして入力
+                  await page.keyboard.type(line);
+                }
+              } else {
+                // 通常のテキスト行
+                await page.keyboard.type(line);
+              }
+              
+              if (i < lines.length - 1) {
+                await page.keyboard.press('Enter');
+                await page.waitForTimeout(50);
+              }
+            }
+            console.log('✅ Body set');
+
+            if (!isPublic) {
+              // 下書き保存
+              const saveBtn = page.locator('button:has-text("下書き保存")').first();
+              await saveBtn.waitFor({ state: 'visible' });
+              await saveBtn.click();
+              await page.waitForTimeout(3000);
+              console.log('✅ Draft saved');
+            } else {
+              // 公開処理
+              const proceedBtn = page.locator('button:has-text("公開に進む")').first();
+              await proceedBtn.waitFor({ state: 'visible' });
+              await proceedBtn.click();
+              await page.waitForTimeout(2000);
+
+              // タグ追加
+              if (tags.length > 0) {
+                const tagInput = page.locator('input[placeholder*="ハッシュタグ"]').first();
+                await tagInput.waitFor({ state: 'visible' });
+                for (const tag of tags) {
+                  await tagInput.fill(tag);
+                  await page.keyboard.press('Enter');
+                  await page.waitForTimeout(200);
+                }
+                console.log('✅ Tags added');
+              }
+
+              // 投稿
+              const publishBtn = page.locator('button:has-text("投稿する")').first();
+              await publishBtn.waitFor({ state: 'visible' });
+              await publishBtn.click();
+              await page.waitForTimeout(5000);
+              console.log('✅ Published');
+            }
+
+            const finalUrl = page.url();
+            console.log('🎉 Success!');
+            console.log('   URL:', finalUrl);
+
+            await browser.close();
+          }
+
+          main().catch(err => {
+            console.error('❌ Error:', err);
+            process.exit(1);
+          });
+          EOFSCRIPT
+
+          echo "✅ Posting script created"
+
+      - name: Execute post to note.com
+        run: |
+          export MD_FILE="${{ env.MD_FILE }}"
+          export THUMBNAIL_PATH="${{ env.THUMBNAIL_PATH }}"
+          export POST_TYPE="${{ github.event.inputs.post_type }}"
+          
+          node /tmp/post-script.mjs
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## 📝 Note Post Result" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Target Folder | \`${{ github.event.inputs.target_folder }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Post Type | **${{ github.event.inputs.post_type }}** |" >> $GITHUB_STEP_SUMMARY
+          echo "| Markdown File | \`${{ env.MD_FILE }}\` |" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ env.THUMBNAIL_PATH }}" ]; then
+            echo "| Thumbnail | \`${{ env.THUMBNAIL_PATH }}\` |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Thumbnail | None |" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Completed at: \`$(date)\`" >> $GITHUB_STEP_SUMMARY

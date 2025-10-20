@@ -1,0 +1,46 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+.pnpm-debug.log*
+
+# Note.com 認証情報（絶対にコミットしない！）
+.note-state.json
+*.note-state.json
+note-state.json
+
+# OS
+.DS_Store
+Thumbs.db
+.Spotlight-V100
+.Trashes
+
+# エディタ
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursor/
+
+# ビルド成果物
+dist/
+build/
+*.log
+
+# 一時ファイル
+tmp/
+temp/
+*.tmp
+
+# スクリーンショット（必要に応じて）
+screenshots/
+*.screenshot.png
+
+# 環境変数
+.env
+.env.local
+.env*.local
+
