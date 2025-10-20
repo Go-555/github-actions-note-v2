@@ -216,29 +216,33 @@ jobs:
               });
               
               console.log('⏳ Waiting for editor to load...');
-              const titleLocatorFactories = [
-                () => page.getByRole('textbox', { name: /記事タイトル|タイトル/i }).first(),
-                () => page.locator('textarea[data-placeholder*="タイトル" i]').first(),
-                () => page.locator('input[data-placeholder*="タイトル" i]').first(),
-                () => page.locator('textarea[placeholder*="タイトル" i]').first(),
-                () => page.locator('input[placeholder*="タイトル" i]').first(),
-                () => page.locator('textarea[aria-label*="タイトル" i]').first(),
-                () => page.locator('input[aria-label*="タイトル" i]').first(),
+              const titleLocatorCandidates = [
+                { label: 'role=textbox name≈タイトル', locator: () => page.getByRole('textbox', { name: /記事タイトル|タイトル/i }).first() },
+                { label: 'textarea[data-placeholder*="タイトル" i]', locator: () => page.locator('textarea[data-placeholder*="タイトル" i]').first() },
+                { label: 'input[data-placeholder*="タイトル" i]', locator: () => page.locator('input[data-placeholder*="タイトル" i]').first() },
+                { label: 'textarea[placeholder*="タイトル" i]', locator: () => page.locator('textarea[placeholder*="タイトル" i]').first() },
+                { label: 'input[placeholder*="タイトル" i]', locator: () => page.locator('input[placeholder*="タイトル" i]').first() },
+                { label: 'textarea[aria-label*="タイトル" i]', locator: () => page.locator('textarea[aria-label*="タイトル" i]').first() },
+                { label: 'input[aria-label*="タイトル" i]', locator: () => page.locator('input[aria-label*="タイトル" i]').first() },
+                { label: 'textarea:first-of-type', locator: () => page.locator('textarea').first() },
+                { label: 'input[type="text"]:first-of-type', locator: () => page.locator('input[type="text"]').first() },
               ];
 
               const triedSelectors = [];
               let titleLocator = null;
-              for (const factory of titleLocatorFactories) {
+              let titleLocatorLabel = '';
+              for (const candidate of titleLocatorCandidates) {
                 let locator;
                 try {
-                  locator = factory();
-                  triedSelectors.push(locator.selector || 'getByRole(textbox:タイトル)');
+                  locator = candidate.locator();
+                  triedSelectors.push(candidate.label);
                   await locator.waitFor({ state: 'visible', timeout: 7000 });
                   titleLocator = locator;
-                  console.log(`✅ Found title field via locator: ${triedSelectors.at(-1)}`);
+                  titleLocatorLabel = candidate.label;
+                  console.log(`✅ Found title field via locator: ${candidate.label}`);
                   break;
                 } catch (err) {
-                  console.log(`ℹ️  Locator not visible yet: ${triedSelectors.at(-1)}`);
+                  console.log(`ℹ️  Locator not visible yet: ${candidate.label}`);
                 }
               }
 
@@ -248,6 +252,7 @@ jobs:
 
               console.log('✅ Editor loaded successfully');
               page.__titleLocator = titleLocator;
+              page.__titleLocatorLabel = titleLocatorLabel;
             } catch (error) {
               console.error('❌ Failed to load editor page');
               console.error('Error:', error.message);
@@ -300,7 +305,7 @@ jobs:
             // タイトル設定
             const titleLocator = page.__titleLocator || page.getByRole('textbox', { name: /記事タイトル|タイトル/i }).first();
             await titleLocator.fill(title);
-            console.log('✅ Title set');
+            console.log(`✅ Title set via locator: ${page.__titleLocatorLabel || 'role=textbox name≈タイトル'}`);
 
             // 本文設定
             const bodyBox = page.locator('div[contenteditable="true"][role="textbox"]').first();
