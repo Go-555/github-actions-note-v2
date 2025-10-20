@@ -216,43 +216,67 @@ jobs:
               });
               
               console.log('⏳ Waiting for editor to load...');
-              const titleLocatorCandidates = [
-                { label: 'role=textbox name≈タイトル', locator: () => page.getByRole('textbox', { name: /記事タイトル|タイトル/i }).first() },
-                { label: 'textarea[data-placeholder*="タイトル" i]', locator: () => page.locator('textarea[data-placeholder*="タイトル" i]').first() },
-                { label: 'input[data-placeholder*="タイトル" i]', locator: () => page.locator('input[data-placeholder*="タイトル" i]').first() },
-                { label: 'textarea[placeholder*="タイトル" i]', locator: () => page.locator('textarea[placeholder*="タイトル" i]').first() },
-                { label: 'input[placeholder*="タイトル" i]', locator: () => page.locator('input[placeholder*="タイトル" i]').first() },
-                { label: 'textarea[aria-label*="タイトル" i]', locator: () => page.locator('textarea[aria-label*="タイトル" i]').first() },
-                { label: 'input[aria-label*="タイトル" i]', locator: () => page.locator('input[aria-label*="タイトル" i]').first() },
-                { label: 'textarea:first-of-type', locator: () => page.locator('textarea').first() },
-                { label: 'input[type="text"]:first-of-type', locator: () => page.locator('input[type="text"]').first() },
+              const titleInputSelectors = [
+                'textarea[data-placeholder*="タイトル" i]',
+                'input[data-placeholder*="タイトル" i]',
+                'textarea[placeholder*="タイトル" i]',
+                'input[placeholder*="タイトル" i]',
+                'textarea[aria-label*="タイトル" i]',
+                'input[aria-label*="タイトル" i]',
+                'textarea',
+                'input[type="text"]',
               ];
 
-              const triedSelectors = [];
-              let titleLocator = null;
-              let titleLocatorLabel = '';
-              for (const candidate of titleLocatorCandidates) {
-                let locator;
+              const titleDisplaySelectors = [
+                '[data-placeholder*="タイトル" i]',
+                '[aria-placeholder*="タイトル" i]',
+                'div[role="textbox"][data-placeholder]',
+                'div[role="textbox"]:has-text("記事タイトル")',
+                'div:has-text("記事タイトル")',
+              ];
+
+              const triedInputs = [];
+              let titleInputSelectorInDom = '';
+              for (const selector of titleInputSelectors) {
+                const locator = page.locator(selector).first();
                 try {
-                  locator = candidate.locator();
-                  triedSelectors.push(candidate.label);
+                  await locator.waitFor({ state: 'attached', timeout: 7000 });
+                  const count = await locator.count();
+                  if (count > 0) {
+                    titleInputSelectorInDom = selector;
+                    console.log(`✅ Found title input candidate in DOM: ${selector}`);
+                    break;
+                  }
+                } catch (err) {
+                  // ignore and try next
+                }
+                triedInputs.push(selector);
+              }
+
+              if (!titleInputSelectorInDom) {
+                throw new Error(`Title input not found. Tried selectors: ${titleInputSelectors.join(', ')}`);
+              }
+
+              let titleDisplaySelectorInDom = '';
+              for (const selector of titleDisplaySelectors) {
+                const locator = page.locator(selector).first();
+                try {
                   await locator.waitFor({ state: 'visible', timeout: 7000 });
-                  titleLocator = locator;
-                  titleLocatorLabel = candidate.label;
-                  console.log(`✅ Found title field via locator: ${candidate.label}`);
+                  titleDisplaySelectorInDom = selector;
+                  console.log(`✅ Found title display field: ${selector}`);
                   break;
                 } catch (err) {
-                  console.log(`ℹ️  Locator not visible yet: ${candidate.label}`);
+                  console.log(`ℹ️  Display locator not visible yet: ${selector}`);
                 }
               }
 
-              if (!titleLocator) {
-                throw new Error(`Title input not found. Tried locators: ${triedSelectors.join(', ')}`);
+              if (!titleDisplaySelectorInDom) {
+                console.log('⚠️  Visible title display not found; will rely on input only');
               }
 
               console.log('✅ Editor loaded successfully');
-              page.__titleLocator = titleLocator;
-              page.__titleLocatorLabel = titleLocatorLabel;
+              page.__titleInputSelector = titleInputSelectorInDom;
+              page.__titleDisplaySelector = titleDisplaySelectorInDom;
             } catch (error) {
               console.error('❌ Failed to load editor page');
               console.error('Error:', error.message);
@@ -303,9 +327,40 @@ jobs:
             }
 
             // タイトル設定
-            const titleLocator = page.__titleLocator || page.getByRole('textbox', { name: /記事タイトル|タイトル/i }).first();
-            await titleLocator.fill(title);
-            console.log(`✅ Title set via locator: ${page.__titleLocatorLabel || 'role=textbox name≈タイトル'}`);
+            if (page.__titleDisplaySelector) {
+              try {
+                const displayLocator = page.locator(page.__titleDisplaySelector).first();
+                await displayLocator.click({ timeout: 5000 }).catch(() => {});
+                await displayLocator.focus().catch(() => {});
+              } catch (err) {
+                console.log(`ℹ️  Could not focus display locator ${page.__titleDisplaySelector}: ${err.message}`);
+              }
+            }
+
+            await page.evaluate(({ selectors, value }) => {
+              const candidateSelectors = selectors as string[];
+              let input: HTMLInputElement | HTMLTextAreaElement | null = null;
+              for (const selector of candidateSelectors) {
+                const el = document.querySelector(selector) as HTMLInputElement | HTMLTextAreaElement | null;
+                if (el) {
+                  input = el;
+                  break;
+                }
+              }
+              if (!input) {
+                throw new Error('Title input element not found during fill');
+              }
+              input.focus();
+              input.value = value;
+              const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value');
+              if (descriptor && descriptor.set) {
+                descriptor.set.call(input, value);
+              }
+              input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+              input.dispatchEvent(new Event('change', { bubbles: true }));
+            }, { selectors: [page.__titleInputSelector, '[data-placeholder*="タイトル" i] textarea', 'textarea'], value: title });
+
+            console.log(`✅ Title set via selector: ${page.__titleInputSelector}`);
 
             // 本文設定
             const bodyBox = page.locator('div[contenteditable="true"][role="textbox"]').first();
