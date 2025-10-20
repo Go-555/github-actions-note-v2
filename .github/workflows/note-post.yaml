@@ -297,29 +297,66 @@ jobs:
             await page.fill('textarea[placeholder*="タイトル"]', title);
             console.log('✅ Title set');
 
-            // 本文設定（画像処理含む）
+            // 本文設定
             const bodyBox = page.locator('div[contenteditable="true"][role="textbox"]').first();
             await bodyBox.waitFor({ state: 'visible' });
             await bodyBox.click();
 
-            const lines = body.split('\n');
-            for (let i = 0; i < lines.length; i++) {
-              const line = lines[i];
+            // 画像を含まない場合は、Markdown全体を一括でクリップボード経由でペースト
+            if (images.length === 0) {
+              console.log('📋 Pasting entire content via clipboard...');
+              await page.evaluate(async (text) => {
+                await navigator.clipboard.writeText(text);
+              }, body);
+              await page.keyboard.press('Control+V');
+              await page.waitForTimeout(1000);
+              console.log('✅ Content pasted');
+            } else {
+              // 画像がある場合は、画像マーカーで分割して処理
+              console.log(`📋 Processing content with ${images.length} images...`);
               
-              // 画像行の場合は画像をアップロード
-              const imageMatch = line.match(/!\[([^\]]*)\]\(([^)]+)\)/);
-              if (imageMatch) {
-                const imagePath = imageMatch[2];
+              // 画像の位置で本文を分割
+              const parts = [];
+              let lastIndex = 0;
+              const imageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+              let match;
+              
+              while ((match = imageRegex.exec(body)) !== null) {
+                // 画像の前のテキスト
+                if (match.index > lastIndex) {
+                  parts.push({ type: 'text', content: body.slice(lastIndex, match.index) });
+                }
+                // 画像
+                const imagePath = match[2];
                 const image = images.find(img => img.localPath === imagePath);
-                
-                if (image && fs.existsSync(image.absolutePath)) {
-                  console.log(`  Uploading image: ${image.localPath}`);
+                if (image) {
+                  parts.push({ type: 'image', image: image });
+                }
+                lastIndex = match.index + match[0].length;
+              }
+              
+              // 最後のテキスト
+              if (lastIndex < body.length) {
+                parts.push({ type: 'text', content: body.slice(lastIndex) });
+              }
+              
+              // 各パートを順番に挿入
+              for (const part of parts) {
+                if (part.type === 'text' && part.content.trim()) {
+                  // テキストをクリップボード経由で挿入
+                  await page.evaluate(async (text) => {
+                    await navigator.clipboard.writeText(text);
+                  }, part.content);
+                  await page.keyboard.press('Control+V');
+                  await page.waitForTimeout(300);
+                } else if (part.type === 'image' && fs.existsSync(part.image.absolutePath)) {
+                  console.log(`  📸 Uploading image: ${part.image.localPath}`);
                   
                   // 画像をクリップボードにコピーしてペースト
-                  const imageBuffer = fs.readFileSync(image.absolutePath);
+                  const imageBuffer = fs.readFileSync(part.image.absolutePath);
                   const base64Image = imageBuffer.toString('base64');
-                  const mimeType = image.absolutePath.endsWith('.png') ? 'image/png' : 
-                                   image.absolutePath.endsWith('.jpg') || image.absolutePath.endsWith('.jpeg') ? 'image/jpeg' : 
+                  const mimeType = part.image.absolutePath.endsWith('.png') ? 'image/png' : 
+                                   part.image.absolutePath.endsWith('.jpg') || part.image.absolutePath.endsWith('.jpeg') ? 'image/jpeg' : 
                                    'image/gif';
                   
                   await page.evaluate(async ({ base64, mime }) => {
@@ -329,26 +366,13 @@ jobs:
                     ]);
                   }, { base64: base64Image, mime: mimeType });
                   
-                  // ペースト
                   await page.keyboard.press('Control+V');
                   await page.waitForTimeout(1000);
-                  
-                  console.log(`  ✅ Image uploaded: ${image.localPath}`);
-                } else {
-                  // 画像ファイルが見つからない場合はテキストとして入力
-                  await page.keyboard.type(line);
+                  console.log(`  ✅ Image uploaded: ${part.image.localPath}`);
                 }
-              } else {
-                // 通常のテキスト行
-                await page.keyboard.type(line);
               }
-              
-              if (i < lines.length - 1) {
-                await page.keyboard.press('Enter');
-                await page.waitForTimeout(50);
-              }
+              console.log('✅ Content with images inserted');
             }
-            console.log('✅ Body set');
 
             if (!isPublic) {
               // 下書き保存
