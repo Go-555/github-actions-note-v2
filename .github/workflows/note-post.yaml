@@ -338,7 +338,7 @@ jobs:
             }
 
             await page.evaluate(({ selectors, value }) => {
-              const candidateSelectors = selectors as string[];
+              const candidateSelectors = Array.isArray(selectors) ? selectors : [];
               let input: HTMLInputElement | HTMLTextAreaElement | null = null;
               for (const selector of candidateSelectors) {
                 const el = document.querySelector(selector) as HTMLInputElement | HTMLTextAreaElement | null;
