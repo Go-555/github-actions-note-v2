@@ -339,9 +339,9 @@ jobs:
 
             await page.evaluate(({ selectors, value }) => {
               const candidateSelectors = Array.isArray(selectors) ? selectors : [];
-              let input: HTMLInputElement | HTMLTextAreaElement | null = null;
+              let input = null;
               for (const selector of candidateSelectors) {
-                const el = document.querySelector(selector) as HTMLInputElement | HTMLTextAreaElement | null;
+                const el = document.querySelector(selector);
                 if (el) {
                   input = el;
                   break;
@@ -350,11 +350,14 @@ jobs:
               if (!input) {
                 throw new Error('Title input element not found during fill');
               }
-              input.focus();
-              input.value = value;
+              if (typeof input.focus === 'function') {
+                input.focus();
+              }
               const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value');
-              if (descriptor && descriptor.set) {
+              if (descriptor && typeof descriptor.set === 'function') {
                 descriptor.set.call(input, value);
+              } else {
+                input.value = value;
               }
               input.dispatchEvent(new InputEvent('input', { bubbles: true }));
               input.dispatchEvent(new Event('change', { bubbles: true }));
