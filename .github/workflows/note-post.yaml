@@ -216,8 +216,32 @@ jobs:
               });
               
               console.log('⏳ Waiting for editor to load...');
-              await page.waitForSelector('textarea[placeholder*="タイトル"]', { timeout: 180000 });
+              const titleSelectors = [
+                'textarea[placeholder*="タイトル"]',
+                'input[placeholder*="タイトル"]',
+                'textarea[aria-label*="タイトル"]',
+                'input[aria-label*="タイトル"]',
+              ];
+
+              let titleLocator = null;
+              for (const selector of titleSelectors) {
+                const locator = page.locator(selector).first();
+                try {
+                  await locator.waitFor({ state: 'visible', timeout: 10000 });
+                  titleLocator = locator;
+                  console.log(`✅ Found title field via selector: ${selector}`);
+                  break;
+                } catch (err) {
+                  console.log(`ℹ️  Selector not visible yet: ${selector}`);
+                }
+              }
+
+              if (!titleLocator) {
+                throw new Error(`Title input not found. Tried selectors: ${titleSelectors.join(', ')}`);
+              }
+
               console.log('✅ Editor loaded successfully');
+              page.__titleLocator = titleLocator;
             } catch (error) {
               console.error('❌ Failed to load editor page');
               console.error('Error:', error.message);
@@ -268,7 +292,8 @@ jobs:
             }
 
             // タイトル設定
-            await page.fill('textarea[placeholder*="タイトル"]', title);
+            const titleLocator = page.__titleLocator || page.locator('textarea[placeholder*="タイトル"]').first();
+            await titleLocator.fill(title);
             console.log('✅ Title set');
 
             // 本文設定
