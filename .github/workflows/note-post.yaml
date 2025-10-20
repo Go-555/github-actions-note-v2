@@ -33,6 +33,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
 
       - name: Validate target folder
         run: |
@@ -76,12 +77,36 @@ jobs:
             fi
           fi
 
+      - name: Get Playwright version
+        id: playwright-version
+        run: |
+          PLAYWRIGHT_VERSION=$(node -p "require('./package-lock.json').packages['node_modules/playwright'].version")
+          echo "version=$PLAYWRIGHT_VERSION" >> $GITHUB_OUTPUT
+          echo "Playwright version: $PLAYWRIGHT_VERSION"
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+
       - name: Install dependencies
         run: |
           npm install
+          echo "✅ Dependencies installed"
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: |
           npx playwright install chromium
           npx playwright install-deps chromium
-          echo "✅ Playwright installed"
+          echo "✅ Playwright browsers installed"
+
+      - name: Skip Playwright install (using cache)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: |
+          echo "✅ Using cached Playwright browsers"
 
       - name: Create posting script
         run: |
@@ -209,11 +234,35 @@ jobs:
               origin: 'https://editor.note.com' 
             });
 
-            await page.goto('https://editor.note.com/new', { 
-              waitUntil: 'domcontentloaded',
-              timeout: 180000 
-            });
-            await page.waitForSelector('textarea[placeholder*="タイトル"]', { timeout: 180000 });
+            try {
+              console.log('🌐 Navigating to editor...');
+              await page.goto('https://editor.note.com/new', { 
+                waitUntil: 'domcontentloaded',
+                timeout: 180000 
+              });
+              
+              console.log('⏳ Waiting for editor to load...');
+              await page.waitForSelector('textarea[placeholder*="タイトル"]', { timeout: 180000 });
+              console.log('✅ Editor loaded successfully');
+            } catch (error) {
+              console.error('❌ Failed to load editor page');
+              console.error('Error:', error.message);
+              
+              // スクリーンショットを撮影
+              const screenshotPath = 'error-screenshot.png';
+              await page.screenshot({ path: screenshotPath, fullPage: true });
+              console.log(`📸 Screenshot saved: ${screenshotPath}`);
+              
+              // 現在のURLを表示
+              console.log('Current URL:', page.url());
+              
+              // ページのタイトルを表示
+              const pageTitle = await page.title();
+              console.log('Page Title:', pageTitle);
+              
+              await browser.close();
+              throw error;
+            }
 
             // サムネイル処理（簡略版）
             if (thumbnailPath && fs.existsSync(thumbnailPath)) {
@@ -357,6 +406,15 @@ jobs:
           export POST_TYPE="${{ github.event.inputs.post_type }}"
           
           node ./post-script.mjs
+
+      - name: Upload error screenshot
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-screenshot
+          path: error-screenshot.png
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Summary
         if: always()
