@@ -217,66 +217,30 @@ jobs:
               
               console.log('⏳ Waiting for editor to load...');
               const titleInputSelectors = [
-                'textarea[data-placeholder*="タイトル" i]',
-                'input[data-placeholder*="タイトル" i]',
+                'textarea[placeholder="記事タイトル"]',
                 'textarea[placeholder*="タイトル" i]',
-                'input[placeholder*="タイトル" i]',
-                'textarea[aria-label*="タイトル" i]',
-                'input[aria-label*="タイトル" i]',
-                'textarea',
-                'input[type="text"]',
               ];
 
-              const titleDisplaySelectors = [
-                '[data-placeholder*="タイトル" i]',
-                '[aria-placeholder*="タイトル" i]',
-                'div[role="textbox"][data-placeholder]',
-                'div[role="textbox"]:has-text("記事タイトル")',
-                'div:has-text("記事タイトル")',
-              ];
-
-              const triedInputs = [];
               let titleInputSelectorInDom = '';
               for (const selector of titleInputSelectors) {
                 const locator = page.locator(selector).first();
                 try {
-                  await locator.waitFor({ state: 'attached', timeout: 7000 });
-                  const count = await locator.count();
-                  if (count > 0) {
-                    titleInputSelectorInDom = selector;
-                    console.log(`✅ Found title input candidate in DOM: ${selector}`);
-                    break;
-                  }
+                  await locator.waitFor({ state: 'visible', timeout: 15000 });
+                  titleInputSelectorInDom = selector;
+                  console.log(`✅ Found title input: ${selector}`);
+                  break;
                 } catch (err) {
-                  // ignore and try next
+                  console.log(`ℹ️  Title input not visible yet: ${selector}`);
                 }
-                triedInputs.push(selector);
               }
 
               if (!titleInputSelectorInDom) {
                 throw new Error(`Title input not found. Tried selectors: ${titleInputSelectors.join(', ')}`);
               }
 
-              let titleDisplaySelectorInDom = '';
-              for (const selector of titleDisplaySelectors) {
-                const locator = page.locator(selector).first();
-                try {
-                  await locator.waitFor({ state: 'visible', timeout: 7000 });
-                  titleDisplaySelectorInDom = selector;
-                  console.log(`✅ Found title display field: ${selector}`);
-                  break;
-                } catch (err) {
-                  console.log(`ℹ️  Display locator not visible yet: ${selector}`);
-                }
-              }
-
-              if (!titleDisplaySelectorInDom) {
-                console.log('⚠️  Visible title display not found; will rely on input only');
-              }
-
               console.log('✅ Editor loaded successfully');
               page.__titleInputSelector = titleInputSelectorInDom;
-              page.__titleDisplaySelector = titleDisplaySelectorInDom;
+              page.__titleDisplaySelector = titleInputSelectorInDom;
             } catch (error) {
               console.error('❌ Failed to load editor page');
               console.error('Error:', error.message);
@@ -327,16 +291,6 @@ jobs:
             }
 
             // タイトル設定
-            if (page.__titleDisplaySelector) {
-              try {
-                const displayLocator = page.locator(page.__titleDisplaySelector).first();
-                await displayLocator.click({ timeout: 5000 }).catch(() => {});
-                await displayLocator.focus().catch(() => {});
-              } catch (err) {
-                console.log(`ℹ️  Could not focus display locator ${page.__titleDisplaySelector}: ${err.message}`);
-              }
-            }
-
             await page.evaluate(({ selectors, value }) => {
               const candidateSelectors = Array.isArray(selectors) ? selectors : [];
               let input = null;
