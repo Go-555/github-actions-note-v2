@@ -211,30 +211,69 @@ jobs:
             try {
               console.log('🌐 Navigating to editor...');
               await page.goto('https://editor.note.com/new', { 
-                waitUntil: 'domcontentloaded',
+                waitUntil: 'networkidle',
                 timeout: 180000 
               });
               
               console.log('⏳ Waiting for editor to load...');
+              
+              // デバッグ: iframeの確認
+              const iframes = await page.locator('iframe').count();
+              console.log(`🔍 Found ${iframes} iframe(s) on the page`);
+              
+              // デバッグ: 全てのtextareaを確認
+              const allTextareas = await page.locator('textarea').count();
+              console.log(`🔍 Found ${allTextareas} textarea(s) on the page`);
+              
+              // デバッグ: ページの状態確認
+              await page.waitForTimeout(3000); // 追加の待機時間
+              
               const titleInputSelectors = [
                 'textarea[placeholder="記事タイトル"]',
                 'textarea[placeholder*="タイトル" i]',
+                'textarea',  // 全てのtextareaを試す
               ];
 
               let titleInputSelectorInDom = '';
               for (const selector of titleInputSelectors) {
                 const locator = page.locator(selector).first();
                 try {
-                  await locator.waitFor({ state: 'visible', timeout: 15000 });
-                  titleInputSelectorInDom = selector;
-                  console.log(`✅ Found title input: ${selector}`);
-                  break;
+                  const count = await locator.count();
+                  console.log(`🔍 Selector '${selector}' found ${count} element(s)`);
+                  
+                  if (count > 0) {
+                    // 要素の詳細情報を取得
+                    const elementInfo = await locator.evaluate(el => ({
+                      tagName: el.tagName,
+                      placeholder: el.getAttribute('placeholder'),
+                      className: el.className,
+                      isVisible: el.offsetWidth > 0 && el.offsetHeight > 0,
+                      parentVisible: el.parentElement && el.parentElement.offsetWidth > 0,
+                    }));
+                    console.log(`📋 Element info:`, JSON.stringify(elementInfo));
+                    
+                    await locator.waitFor({ state: 'visible', timeout: 5000 });
+                    titleInputSelectorInDom = selector;
+                    console.log(`✅ Found title input: ${selector}`);
+                    break;
+                  }
                 } catch (err) {
-                  console.log(`ℹ️  Title input not visible yet: ${selector}`);
+                  console.log(`ℹ️  Error with selector '${selector}': ${err.message}`);
                 }
               }
 
               if (!titleInputSelectorInDom) {
+                // ページのHTMLの一部を出力してデバッグ
+                const bodyHTML = await page.evaluate(() => {
+                  const textareas = Array.from(document.querySelectorAll('textarea'));
+                  return textareas.map(ta => ({
+                    outerHTML: ta.outerHTML.substring(0, 200),
+                    placeholder: ta.placeholder,
+                    isVisible: ta.offsetWidth > 0 && ta.offsetHeight > 0,
+                  }));
+                });
+                console.log('🔍 All textareas found:', JSON.stringify(bodyHTML, null, 2));
+                
                 throw new Error(`Title input not found. Tried selectors: ${titleInputSelectors.join(', ')}`);
               }
 
