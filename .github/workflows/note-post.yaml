@@ -208,6 +208,26 @@ jobs:
               origin: 'https://editor.note.com' 
             });
 
+            // まずホームページにアクセスして認証状態を確認
+            console.log('🔐 Checking authentication status...');
+            await page.goto('https://note.com', { waitUntil: 'networkidle' });
+            await page.waitForTimeout(2000);
+            
+            // ログイン状態の確認
+            const isLoggedIn = await page.evaluate(() => {
+              // ユーザーアイコンやログアウトボタンの存在を確認
+              return !!document.querySelector('a[href*="/logout"]') || 
+                     !!document.querySelector('img[alt*="アカウント"]') ||
+                     !!document.querySelector('[data-testid="user-icon"]') ||
+                     !!document.querySelector('button[aria-label*="アカウント"]');
+            });
+            
+            console.log(`🔐 Login status: ${isLoggedIn ? 'Logged in' : 'Not logged in'}`);
+            
+            if (!isLoggedIn) {
+              throw new Error('Authentication failed. Please check NOTE_STATE_JSON.');
+            }
+            
             try {
               console.log('🌐 Navigating to editor...');
               await page.goto('https://editor.note.com/new', { 
@@ -217,21 +237,32 @@ jobs:
               
               console.log('⏳ Waiting for editor to load...');
               
+              // より長い待機時間とSPA読み込み待機
+              await page.waitForLoadState('networkidle');
+              await page.waitForTimeout(5000); // JavaScriptの実行を待つ
+              
               // デバッグ: iframeの確認
               const iframes = await page.locator('iframe').count();
               console.log(`🔍 Found ${iframes} iframe(s) on the page`);
               
-              // デバッグ: 全てのtextareaを確認
+              // デバッグ: 全てのtextareaとinputを確認
               const allTextareas = await page.locator('textarea').count();
-              console.log(`🔍 Found ${allTextareas} textarea(s) on the page`);
+              const allInputs = await page.locator('input[type="text"]').count();
+              console.log(`🔍 Found ${allTextareas} textarea(s) and ${allInputs} text input(s) on the page`);
               
-              // デバッグ: ページの状態確認
-              await page.waitForTimeout(3000); // 追加の待機時間
+              // contenteditable要素も確認
+              const editableElements = await page.locator('[contenteditable="true"]').count();
+              console.log(`🔍 Found ${editableElements} contenteditable element(s)`);
               
               const titleInputSelectors = [
                 'textarea[placeholder="記事タイトル"]',
                 'textarea[placeholder*="タイトル" i]',
-                'textarea',  // 全てのtextareaを試す
+                'input[placeholder="記事タイトル"]',
+                'input[placeholder*="タイトル" i]',
+                '[contenteditable="true"][data-placeholder*="タイトル"]',
+                '[contenteditable="true"]:first-of-type',
+                'textarea',
+                'input[type="text"]',
               ];
 
               let titleInputSelectorInDom = '';
