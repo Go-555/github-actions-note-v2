@@ -75,24 +75,34 @@ async function loginToNote() {
     console.log('📝 ブラウザでログインしてください');
     console.log('━'.repeat(60));
     console.log();
-    console.log('1. メールアドレス/パスワードまたは外部サービスでログイン');
-    console.log('2. ログイン完了後、ホーム画面が表示されることを確認');
-    console.log('3. このターミナルに戻って Enter キーを押してください');
+    console.log('手動でログインしてください。ログイン完了を自動検知します...');
+    console.log('(note.comのホーム画面に遷移すると自動的に次のステップに進みます)');
     console.log();
 
-    // ユーザーがログインするまで待機
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout
-    });
-
-    await new Promise((resolve) => {
-      rl.question('Enter キーを押してください...', () => {
-        rl.close();
-        resolve();
+    // ログイン完了を自動検知（note.comのトップページに遷移するまで待機）
+    try {
+      await page.waitForURL(/note\.com\/?$/, { timeout: 300000 }); // 5分待機
+      console.log('✅ ログイン完了を検知しました！');
+    } catch (error) {
+      console.log();
+      console.log('⚠️  ログイン完了の自動検知に失敗しました。');
+      console.log('   ログインできている場合は Enter キーを押してください...');
+      
+      const rl2 = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
       });
-    });
-
+      
+      await new Promise((resolve) => {
+        rl2.question('', () => {
+          rl2.close();
+          resolve();
+        });
+      });
+      
+      console.log('✅ 続行します');
+    }
+    
     console.log();
     console.log('認証状態を保存しています...');
 

@@ -192,17 +192,45 @@ jobs:
 
             const browser = await chromium.launch({
               headless: true,
-              args: ['--lang=ja-JP', '--no-sandbox', '--disable-setuid-sandbox'],
+              args: [
+                '--lang=ja-JP',
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-blink-features=AutomationControlled',
+              ],
             });
 
             const context = await browser.newContext({
               storageState: statePath,
               locale: 'ja-JP',
               permissions: ['clipboard-read', 'clipboard-write'],
+              userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+              viewport: { width: 1280, height: 720 },
+              deviceScaleFactor: 1,
+              isMobile: false,
+              hasTouch: false,
             });
 
             const page = await context.newPage();
             page.setDefaultTimeout(180000);
+            
+            // Headless検知を回避
+            await page.addInitScript(() => {
+              Object.defineProperty(navigator, 'webdriver', {
+                get: () => false,
+              });
+              // Chrome特有のプロパティを追加
+              window.chrome = {
+                runtime: {},
+              };
+              // Permissions APIのモック
+              const originalQuery = window.navigator.permissions.query;
+              window.navigator.permissions.query = (parameters) => (
+                parameters.name === 'notifications' ?
+                  Promise.resolve({ state: Notification.permission }) :
+                  originalQuery(parameters)
+              );
+            });
 
             await context.grantPermissions(['clipboard-read', 'clipboard-write'], { 
               origin: 'https://editor.note.com' 
@@ -213,14 +241,17 @@ jobs:
             await page.goto('https://note.com', { waitUntil: 'networkidle' });
             await page.waitForTimeout(2000);
             
-            // ログイン状態の確認
-            const isLoggedIn = await page.evaluate(() => {
-              // ユーザーアイコンやログアウトボタンの存在を確認
-              return !!document.querySelector('a[href*="/logout"]') || 
-                     !!document.querySelector('img[alt*="アカウント"]') ||
-                     !!document.querySelector('[data-testid="user-icon"]') ||
-                     !!document.querySelector('button[aria-label*="アカウント"]');
+            // ログイン状態の確認（より確実な方法）
+            const loginCheck = await page.evaluate(() => {
+              return {
+                hasNotificationIcon: !!document.querySelector('[aria-label*="通知"]'),
+                hasNoteCreateButton: Array.from(document.querySelectorAll('a')).some(a => a.textContent.includes('記事を書く')),
+                hasLoginLink: !!document.querySelector('a[href*="/login"]'),
+              };
             });
+            
+            // 通知アイコンがあるか、記事を書くボタンがあればログイン済み
+            const isLoggedIn = loginCheck.hasNotificationIcon || loginCheck.hasNoteCreateButton || !loginCheck.hasLoginLink;
             
             console.log(`🔐 Login status: ${isLoggedIn ? 'Logged in' : 'Not logged in'}`);
             
