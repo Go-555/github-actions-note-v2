@@ -511,33 +511,25 @@ jobs:
                 if (part.type === 'text' && part.content.trim()) {
                   console.log(`   Text part length: ${part.content.length} characters`);
                   
-                  // URLを含む場合は行ごとに処理
-                  const textLines = part.content.split('\n');
-                  for (let lineIdx = 0; lineIdx < textLines.length; lineIdx++) {
-                    const line = textLines[lineIdx];
-                    
-                    // テキストをクリップボード経由で挿入
-                    if (line.trim()) {
-                      await page.evaluate(async (text) => {
-                        await navigator.clipboard.writeText(text);
-                      }, line);
-                      await page.keyboard.press('Control+V');
-                      await page.waitForTimeout(100);
-                    }
-                    
-                    // 改行（最後の行以外）
-                    if (lineIdx < textLines.length - 1) {
-                      await page.keyboard.press('Enter');
-                      await page.waitForTimeout(100);
-                    }
-                    
-                    // URL単独行の場合、追加でEnterを押してリンクカード化
-                    const isUrlLine = /^https?:\/\/[^\s]+$/.test(line.trim());
-                    if (isUrlLine) {
-                      await page.keyboard.press('Enter');
-                      await page.waitForTimeout(800); // リンクカード展開を待つ
-                    }
+                  // テキストをクリップボード経由で挿入
+                  await page.evaluate(async (text) => {
+                    await navigator.clipboard.writeText(text);
+                  }, part.content);
+                  await page.keyboard.press('Control+V');
+                  await page.waitForTimeout(300);
+                  
+                  // テキストの最後の行がURLかどうか確認
+                  const lines = part.content.trim().split('\n');
+                  const lastLine = lines[lines.length - 1].trim();
+                  const endsWithUrl = /^https?:\/\/[^\s]+$/.test(lastLine);
+                  
+                  if (endsWithUrl) {
+                    // URL単独行で終わる場合、追加でEnterを押してリンクカード化
+                    await page.keyboard.press('Enter');
+                    await page.waitForTimeout(800); // リンクカード展開を待つ
+                    console.log(`   ℹ️  URL detected, pressed Enter for link card`);
                   }
+                  
                   console.log(`   ✅ Text pasted`);
                 } else if (part.type === 'image' && fs.existsSync(part.image.absolutePath)) {
                   console.log(`  📸 Uploading image: ${part.image.localPath}`);
