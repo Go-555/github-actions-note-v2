@@ -393,37 +393,24 @@ jobs:
               } catch (err) {
                 console.log('⚠️  Thumbnail upload failed:', err.message);
               }
-              
-              // サムネイルアップロード後、サイドバーを閉じる
-              try {
-                console.log('🚪 Closing sidebar...');
-                const closeBtn = page.locator('button:has-text("閉じる")').first();
-                const closeBtnVisible = await closeBtn.isVisible().catch(() => false);
-                if (closeBtnVisible) {
-                  await closeBtn.click({ force: true });
-                  await page.waitForTimeout(500);
-                  console.log('✅ Sidebar closed');
-                } else {
-                  console.log('ℹ️  Close button not found, sidebar may already be closed');
-                }
-              } catch (err) {
-                console.log('ℹ️  Could not close sidebar:', err.message);
-              }
             }
 
-            // タイトル設定（サイドバーを閉じた後、UIが安定するまで待機）
+            // タイトル設定
             console.log('📝 Setting title...');
-            await page.waitForTimeout(1000); // UI再レンダリングを待つ
-            
+            await page.waitForTimeout(500);
             const titleField = page.locator('textarea[placeholder*="タイトル"]').first();
-            await titleField.waitFor({ state: 'visible', timeout: 10000 });
             await titleField.fill(title);
             console.log('✅ Title set');
 
             // 本文設定
             console.log('📝 Setting body...');
+            await page.waitForTimeout(500);
             const bodyBox = page.locator('div[contenteditable="true"][role="textbox"]').first();
             await bodyBox.waitFor({ state: 'visible', timeout: 10000 });
+            
+            // Adobe Expressのヘルプが邪魔する場合に備えて、Escapeキーで全てのモーダルを閉じる
+            await page.keyboard.press('Escape');
+            await page.waitForTimeout(300);
             
             // 要素にフォーカスを当てる（クリックの代わりに直接フォーカス）
             await bodyBox.evaluate(el => {
