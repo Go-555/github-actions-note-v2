@@ -536,6 +536,11 @@ jobs:
                   
                   await page.keyboard.press('Control+V');
                   await page.waitForTimeout(1000);
+                  
+                  // 画像貼り付け後、改行してテキスト入力モードに戻る
+                  await page.keyboard.press('Enter');
+                  await page.waitForTimeout(300);
+                  
                   console.log(`  ✅ Image uploaded: ${part.image.localPath}`);
                 }
               }
