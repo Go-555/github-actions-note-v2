@@ -511,51 +511,36 @@ jobs:
                 if (part.type === 'text' && part.content.trim()) {
                   console.log(`   Text part length: ${part.content.length} characters`);
                   
-                  // テキストを行ごとに分割し、URL行とそれ以外を区別して処理
+                  // 1行ずつクリップボード貼り付けで処理
                   const lines = part.content.split('\n');
-                  let buffer = '';
                   let urlCount = 0;
                   
                   for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
                     const line = lines[lineIdx];
+                    const isLastLine = lineIdx === lines.length - 1;
                     const isUrlLine = /^https?:\/\/[^\s]+$/.test(line.trim());
                     
-                    if (isUrlLine) {
-                      // バッファにあるテキストを先に貼り付け（空行も保持）
-                      if (buffer) {
-                        await page.evaluate(async (text) => {
-                          await navigator.clipboard.writeText(text);
-                        }, buffer);
-                        await page.keyboard.press('Control+V');
-                        await page.waitForTimeout(100);
-                        buffer = '';
-                      }
-                      
-                      // URL行を貼り付け
+                    // 行をクリップボード経由で貼り付け
+                    if (line.trim() || !isLastLine) {
                       await page.evaluate(async (text) => {
                         await navigator.clipboard.writeText(text);
                       }, line);
                       await page.keyboard.press('Control+V');
-                      await page.waitForTimeout(100);
-                      
-                      // Enterでリンクカード化
-                      await page.keyboard.press('Enter');
-                      await page.waitForTimeout(1200); // リンクカード展開をしっかり待つ
-                      urlCount++;
-                      
-                    } else {
-                      // 通常行はバッファに追加（改行も保持）
-                      buffer += line + (lineIdx < lines.length - 1 ? '\n' : '');
+                      await page.waitForTimeout(50);
                     }
-                  }
-                  
-                  // 残りのバッファを貼り付け（空でなければ）
-                  if (buffer) {
-                    await page.evaluate(async (text) => {
-                      await navigator.clipboard.writeText(text);
-                    }, buffer);
-                    await page.keyboard.press('Control+V');
-                    await page.waitForTimeout(100);
+                    
+                    // 改行（最後の行以外）
+                    if (!isLastLine) {
+                      await page.keyboard.press('Enter');
+                      await page.waitForTimeout(50);
+                    }
+                    
+                    // URL行の場合、追加でEnterを押してリンクカード化
+                    if (isUrlLine) {
+                      await page.keyboard.press('Enter');
+                      await page.waitForTimeout(1200); // リンクカード展開を待つ
+                      urlCount++;
+                    }
                   }
                   
                   if (urlCount > 0) {
