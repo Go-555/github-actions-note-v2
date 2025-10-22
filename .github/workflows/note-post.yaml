@@ -541,13 +541,33 @@ jobs:
               }
               console.log('✅ Content with images inserted');
             }
+            
+            // コンテンツが反映されるまで待機
+            console.log('⏳ Waiting for content to be reflected...');
+            await page.waitForTimeout(2000);
+            
+            // 入力内容の最終確認
+            const finalTitleValue = await page.locator('textarea[placeholder*="タイトル"]').first().inputValue();
+            const finalBodyContent = await page.locator('div[contenteditable="true"][role="textbox"]').first().textContent();
+            console.log(`📊 Final check - Title: ${finalTitleValue.length} chars, Body: ${finalBodyContent.length} chars`);
 
             if (!isPublic) {
               // 下書き保存
+              console.log('💾 Saving draft...');
               const saveBtn = page.locator('button:has-text("下書き保存")').first();
               await saveBtn.waitFor({ state: 'visible' });
+              
+              // 保存前にもう一度待機
+              await page.waitForTimeout(1000);
+              
               await saveBtn.click();
-              await page.waitForTimeout(3000);
+              
+              // 保存完了メッセージを待つ
+              await page.locator('text=保存しました').waitFor({ timeout: 10000 }).catch(() => {
+                console.log('ℹ️  "保存しました" message not found, but continuing...');
+              });
+              await page.waitForTimeout(2000);
+              
               console.log('✅ Draft saved');
             } else {
               // 公開処理
