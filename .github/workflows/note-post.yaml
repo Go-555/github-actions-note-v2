@@ -511,25 +511,42 @@ jobs:
                 if (part.type === 'text' && part.content.trim()) {
                   console.log(`   Text part length: ${part.content.length} characters`);
                   
-                  // URL単独行の後に改行を追加してリンクカード化を促す
-                  // 例: "https://example.com" → "https://example.com\n"
-                  const processedText = part.content.replace(/^(https?:\/\/[^\s]+)$/gm, '$1\n');
+                  // 空行で段落を分割
+                  const paragraphs = part.content.split(/\n\n+/);
                   
-                  const urlCount = (part.content.match(/^https?:\/\/[^\s]+$/gm) || []).length;
-                  if (urlCount > 0) {
-                    console.log(`   ℹ️  Found ${urlCount} URL line(s), added line breaks for link card expansion`);
-                  }
-                  
-                  // テキストをクリップボード経由で挿入
-                  await page.evaluate(async (text) => {
-                    await navigator.clipboard.writeText(text);
-                  }, processedText);
-                  await page.keyboard.press('Control+V');
-                  await page.waitForTimeout(300);
-                  
-                  // URL後の追加待機（リンクカード展開用）
-                  if (urlCount > 0) {
-                    await page.waitForTimeout(urlCount * 800); // URL数に応じて待機
+                  for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
+                    const paragraph = paragraphs[pIdx];
+                    if (!paragraph.trim()) continue;
+                    
+                    // 段落をクリップボード経由で挿入
+                    await page.evaluate(async (text) => {
+                      await navigator.clipboard.writeText(text);
+                    }, paragraph);
+                    await page.keyboard.press('Control+V');
+                    await page.waitForTimeout(200);
+                    
+                    // 段落の最後の行がURL単独行かチェック
+                    const lines = paragraph.trim().split('\n');
+                    const lastLine = lines[lines.length - 1].trim();
+                    const isUrlLine = /^https?:\/\/[^\s]+$/.test(lastLine);
+                    
+                    // 次の段落に進む（段落区切りの改行）
+                    if (pIdx < paragraphs.length - 1) {
+                      await page.keyboard.press('Enter');
+                      await page.waitForTimeout(100);
+                      
+                      // URL行の場合は追加でもう1回Enter（リンクカード化）
+                      if (isUrlLine) {
+                        await page.keyboard.press('Enter');
+                        await page.waitForTimeout(800);
+                        console.log(`   ℹ️  URL detected, added extra Enter for link card`);
+                      }
+                    } else if (isUrlLine) {
+                      // 最後の段落がURLで終わる場合も追加Enter
+                      await page.keyboard.press('Enter');
+                      await page.waitForTimeout(800);
+                      console.log(`   ℹ️  URL detected at end, added Enter for link card`);
+                    }
                   }
                   
                   console.log(`   ✅ Text pasted`);
