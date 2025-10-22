@@ -511,28 +511,115 @@ jobs:
                 if (part.type === 'text' && part.content.trim()) {
                   console.log(`   Text part length: ${part.content.length} characters`);
                   
-                  // 参考コードと同じく1行ずつキーボード入力で処理
+                  // 参考コード（index.ts）と同じ処理を実装
                   const lines = part.content.split('\n');
                   let urlCount = 0;
+                  let previousLineWasList = false;
+                  let previousLineWasQuote = false;
+                  let previousLineWasHorizontalRule = false;
                   
                   for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
                     const line = lines[lineIdx];
                     const isLastLine = lineIdx === lines.length - 1;
-                    const isUrlLine = /^https?:\/\/[^\s]+$/.test(line.trim());
                     
-                    // 行をキーボード入力
-                    await page.keyboard.type(line);
-                    
-                    // URL行の場合、追加でEnterを押してリンクカード化
-                    if (isUrlLine) {
-                      await page.keyboard.press('Enter');
-                      await page.waitForTimeout(1200); // リンクカード展開を待つ
-                      urlCount++;
+                    // コードブロックの開始を検出
+                    if (line.trim().startsWith('```')) {
+                      // コードブロック全体（```から```まで）を収集
+                      const codeBlockLines = [line];
+                      let j = lineIdx + 1;
+                      
+                      while (j < lines.length) {
+                        codeBlockLines.push(lines[j]);
+                        if (lines[j].trim().startsWith('```')) {
+                          break;
+                        }
+                        j++;
+                      }
+                      
+                      // コードブロック全体をクリップボードで貼り付け
+                      const codeBlockContent = codeBlockLines.join('\n');
+                      await page.evaluate((text) => {
+                        return navigator.clipboard.writeText(text);
+                      }, codeBlockContent);
+                      await page.keyboard.press('Control+V');
+                      await page.waitForTimeout(300);
+                      
+                      // コードブロックの後に改行（最終行でない場合）
+                      if (j < lines.length - 1) {
+                        await page.keyboard.press('Enter');
+                      }
+                      
+                      // インデックスを進める
+                      lineIdx = j;
+                      
+                      // フラグをリセット
+                      previousLineWasList = false;
+                      previousLineWasQuote = false;
+                      previousLineWasHorizontalRule = false;
+                      continue;
                     }
                     
-                    // 改行（最後の行以外、またはURL行の場合は既にEnterを押しているのでスキップ）
-                    if (!isLastLine && !isUrlLine) {
+                    // 水平線かどうかをチェック
+                    const isHorizontalRule = line.trim() === '---';
+                    
+                    // 水平線の直後の空行をスキップ
+                    if (previousLineWasHorizontalRule && line.trim() === '') {
+                      previousLineWasHorizontalRule = false;
+                      continue;
+                    }
+                    previousLineWasHorizontalRule = false;
+                    
+                    // リスト項目かどうかをチェック
+                    const isBulletList = /^(\s*)- /.test(line);
+                    const isNumberedList = /^(\s*)\d+\.\s/.test(line);
+                    const isCurrentLineList = isBulletList || isNumberedList;
+                    
+                    // 引用かどうかをチェック
+                    const isQuote = /^>/.test(line);
+                    
+                    // 通常のテキスト行を処理
+                    let processedLine = line;
+                    
+                    // 前の行がリスト項目で、現在の行もリスト項目なら、マークダウン記号を削除
+                    if (previousLineWasList && isCurrentLineList) {
+                      if (isBulletList) {
+                        processedLine = processedLine.replace(/^(\s*)- /, '$1');
+                      }
+                      if (isNumberedList) {
+                        processedLine = processedLine.replace(/^(\s*)\d+\.\s/, '$1');
+                      }
+                    }
+                    
+                    // 前の行が引用で、現在の行も引用なら、マークダウン記号を削除
+                    if (previousLineWasQuote && isQuote) {
+                      processedLine = processedLine.replace(/^>\s?/, '');
+                    }
+                    
+                    // 行をキーボード入力
+                    await page.keyboard.type(processedLine);
+                    
+                    // 次の行のために、現在の行の状態を記録
+                    previousLineWasList = isCurrentLineList;
+                    previousLineWasQuote = isQuote;
+                    previousLineWasHorizontalRule = isHorizontalRule;
+                    
+                    // URL単独行の場合、追加でEnterを押してリンクカード化
+                    const isUrlLine = /^https?:\/\/[^\s]+$/.test(line.trim());
+                    if (isUrlLine) {
                       await page.keyboard.press('Enter');
+                      await page.waitForTimeout(1200); // リンクカード展開
+                      urlCount++;
+                      
+                      // 次の行がある場合、ArrowDownでカード外に移動
+                      if (!isLastLine) {
+                        await page.keyboard.press('ArrowDown');
+                        await page.waitForTimeout(150);
+                      }
+                    } else {
+                      // URL以外の行の場合のみ、最後の行でなければ改行
+                      if (!isLastLine) {
+                        await page.keyboard.press('Enter');
+                      }
                     }
                   }
                   
