@@ -411,9 +411,13 @@ jobs:
               }
             }
 
-            // タイトル設定
+            // タイトル設定（サイドバーを閉じた後、UIが安定するまで待機）
             console.log('📝 Setting title...');
-            await page.fill('textarea[placeholder*="タイトル"]', title);
+            await page.waitForTimeout(1000); // UI再レンダリングを待つ
+            
+            const titleField = page.locator('textarea[placeholder*="タイトル"]').first();
+            await titleField.waitFor({ state: 'visible', timeout: 10000 });
+            await titleField.fill(title);
             console.log('✅ Title set');
 
             // 本文設定
