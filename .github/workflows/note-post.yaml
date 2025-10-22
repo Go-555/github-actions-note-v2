@@ -268,80 +268,10 @@ jobs:
               
               console.log('⏳ Waiting for editor to load...');
               
-              // より長い待機時間とSPA読み込み待機
+              // エディタの基本要素が読み込まれるまで待機
               await page.waitForLoadState('networkidle');
-              await page.waitForTimeout(5000); // JavaScriptの実行を待つ
-              
-              // デバッグ: iframeの確認
-              const iframes = await page.locator('iframe').count();
-              console.log(`🔍 Found ${iframes} iframe(s) on the page`);
-              
-              // デバッグ: 全てのtextareaとinputを確認
-              const allTextareas = await page.locator('textarea').count();
-              const allInputs = await page.locator('input[type="text"]').count();
-              console.log(`🔍 Found ${allTextareas} textarea(s) and ${allInputs} text input(s) on the page`);
-              
-              // contenteditable要素も確認
-              const editableElements = await page.locator('[contenteditable="true"]').count();
-              console.log(`🔍 Found ${editableElements} contenteditable element(s)`);
-              
-              const titleInputSelectors = [
-                'textarea[placeholder="記事タイトル"]',
-                'textarea[placeholder*="タイトル" i]',
-                'input[placeholder="記事タイトル"]',
-                'input[placeholder*="タイトル" i]',
-                '[contenteditable="true"][data-placeholder*="タイトル"]',
-                '[contenteditable="true"]:first-of-type',
-                'textarea',
-                'input[type="text"]',
-              ];
-
-              let titleInputSelectorInDom = '';
-              for (const selector of titleInputSelectors) {
-                const locator = page.locator(selector).first();
-                try {
-                  const count = await locator.count();
-                  console.log(`🔍 Selector '${selector}' found ${count} element(s)`);
-                  
-                  if (count > 0) {
-                    // 要素の詳細情報を取得
-                    const elementInfo = await locator.evaluate(el => ({
-                      tagName: el.tagName,
-                      placeholder: el.getAttribute('placeholder'),
-                      className: el.className,
-                      isVisible: el.offsetWidth > 0 && el.offsetHeight > 0,
-                      parentVisible: el.parentElement && el.parentElement.offsetWidth > 0,
-                    }));
-                    console.log(`📋 Element info:`, JSON.stringify(elementInfo));
-                    
-                    await locator.waitFor({ state: 'visible', timeout: 5000 });
-                    titleInputSelectorInDom = selector;
-                    console.log(`✅ Found title input: ${selector}`);
-                    break;
-                  }
-                } catch (err) {
-                  console.log(`ℹ️  Error with selector '${selector}': ${err.message}`);
-                }
-              }
-
-              if (!titleInputSelectorInDom) {
-                // ページのHTMLの一部を出力してデバッグ
-                const bodyHTML = await page.evaluate(() => {
-                  const textareas = Array.from(document.querySelectorAll('textarea'));
-                  return textareas.map(ta => ({
-                    outerHTML: ta.outerHTML.substring(0, 200),
-                    placeholder: ta.placeholder,
-                    isVisible: ta.offsetWidth > 0 && ta.offsetHeight > 0,
-                  }));
-                });
-                console.log('🔍 All textareas found:', JSON.stringify(bodyHTML, null, 2));
-                
-                throw new Error(`Title input not found. Tried selectors: ${titleInputSelectors.join(', ')}`);
-              }
-
+              await page.waitForSelector('textarea[placeholder*="タイトル"]', { timeout: 30000 });
               console.log('✅ Editor loaded successfully');
-              page.__titleInputSelector = titleInputSelectorInDom;
-              page.__titleDisplaySelector = titleInputSelectorInDom;
             } catch (error) {
               console.error('❌ Failed to load editor page');
               console.error('Error:', error.message);
@@ -362,68 +292,146 @@ jobs:
               throw error;
             }
 
-            // サムネイル処理（簡略版）
+            // サムネイル処理（参考コードの堅牢な方法を採用）
             if (thumbnailPath && fs.existsSync(thumbnailPath)) {
               console.log('🖼️  Uploading thumbnail...');
               try {
-                const addBtn = page.locator('button[aria-label="画像を追加"]').first();
-                await addBtn.waitFor({ state: 'visible', timeout: 10000 });
-                await addBtn.click();
+                // 複数の「画像を追加」ボタンがある場合、最も上のもの（Y座標が小さい）を選択
+                const candidates = page.locator('button[aria-label="画像を追加"]');
+                await candidates.first().waitFor({ state: 'visible', timeout: 15000 });
+
+                let target = candidates.first();
+                const cnt = await candidates.count();
+                if (cnt > 1) {
+                  console.log(`🔍 Found ${cnt} "画像を追加" buttons, selecting the topmost one`);
+                  let minY = Infinity;
+                  let idx = 0;
+                  for (let i = 0; i < cnt; i++) {
+                    const box = await candidates.nth(i).boundingBox();
+                    if (box && box.y < minY) {
+                      minY = box.y;
+                      idx = i;
+                    }
+                  }
+                  target = candidates.nth(idx);
+                  console.log(`✅ Selected button at index ${idx} (Y: ${minY})`);
+                }
+
+                await target.scrollIntoViewIfNeeded();
+                await target.click({ force: true });
 
                 const uploadBtn = page.locator('button:has-text("画像をアップロード")').first();
                 await uploadBtn.waitFor({ state: 'visible', timeout: 10000 });
 
-                const fileInput = page.locator('input[type="file"]').first();
-                await fileInput.setInputFiles(thumbnailPath);
+                // filechooserイベントを待つ（フォールバック付き）
+                let chooser = null;
+                try {
+                  [chooser] = await Promise.all([
+                    page.waitForEvent('filechooser', { timeout: 5000 }),
+                    uploadBtn.click({ force: true }),
+                  ]);
+                } catch (e) {
+                  console.log('ℹ️  filechooser event not captured, using fallback');
+                }
 
-                await page.waitForTimeout(2000);
+                if (chooser) {
+                  await chooser.setFiles(thumbnailPath);
+                } else {
+                  await uploadBtn.click({ force: true }).catch(() => {});
+                  const fileInput = page.locator('input[type="file"]').first();
+                  await fileInput.waitFor({ state: 'attached', timeout: 10000 });
+                  await fileInput.setInputFiles(thumbnailPath);
+                }
 
+                // トリミングダイアログの処理
                 const dialog = page.locator('div[role="dialog"]');
-                const saveBtn = dialog.locator('button:has-text("保存")').first();
-                await saveBtn.waitFor({ state: 'visible', timeout: 10000 });
-                await page.waitForTimeout(1000);
-                await saveBtn.click();
-                await page.waitForTimeout(2000);
+                await dialog.waitFor({ state: 'visible', timeout: 10000 });
 
-                console.log('✅ Thumbnail uploaded');
+                const saveThumbBtn = dialog.locator('button:has-text("保存")').first();
+                const cropper = dialog.locator('[data-testid="cropper"]').first();
+
+                // cropperとsaveボタンの状態を確認
+                const cropperEl = await cropper.elementHandle();
+                const saveEl = await saveThumbBtn.elementHandle();
+
+                if (cropperEl && saveEl) {
+                  await Promise.race([
+                    page.waitForFunction(
+                      (el) => getComputedStyle(el).pointerEvents === 'none',
+                      cropperEl,
+                      { timeout: 10000 }
+                    ),
+                    page.waitForFunction(
+                      (el) => !el.disabled,
+                      saveEl,
+                      { timeout: 10000 }
+                    ),
+                  ]).catch(() => {});
+                }
+
+                await saveThumbBtn.click();
+                await dialog.waitFor({ state: 'hidden', timeout: 10000 }).catch(() => {});
+                await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+
+                // 反映確認
+                const changedBtn = page.locator('button[aria-label="画像を変更"]');
+                const addBtn = page.locator('button[aria-label="画像を追加"]');
+
+                let applied = false;
+                try {
+                  await changedBtn.waitFor({ state: 'visible', timeout: 5000 });
+                  applied = true;
+                } catch {}
+                if (!applied) {
+                  try {
+                    await addBtn.waitFor({ state: 'hidden', timeout: 5000 });
+                    applied = true;
+                  } catch {}
+                }
+
+                console.log(applied ? '✅ Thumbnail uploaded and verified' : '⚠️  Thumbnail uploaded but verification uncertain');
               } catch (err) {
                 console.log('⚠️  Thumbnail upload failed:', err.message);
+              }
+              
+              // サムネイルアップロード後、サイドバーを閉じる
+              try {
+                console.log('🚪 Closing sidebar...');
+                const closeBtn = page.locator('button:has-text("閉じる")').first();
+                const closeBtnVisible = await closeBtn.isVisible().catch(() => false);
+                if (closeBtnVisible) {
+                  await closeBtn.click({ force: true });
+                  await page.waitForTimeout(500);
+                  console.log('✅ Sidebar closed');
+                } else {
+                  console.log('ℹ️  Close button not found, sidebar may already be closed');
+                }
+              } catch (err) {
+                console.log('ℹ️  Could not close sidebar:', err.message);
               }
             }
 
             // タイトル設定
-            await page.evaluate(({ selectors, value }) => {
-              const candidateSelectors = Array.isArray(selectors) ? selectors : [];
-              let input = null;
-              for (const selector of candidateSelectors) {
-                const el = document.querySelector(selector);
-                if (el) {
-                  input = el;
-                  break;
-                }
-              }
-              if (!input) {
-                throw new Error('Title input element not found during fill');
-              }
-              if (typeof input.focus === 'function') {
-                input.focus();
-              }
-              const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value');
-              if (descriptor && typeof descriptor.set === 'function') {
-                descriptor.set.call(input, value);
-              } else {
-                input.value = value;
-              }
-              input.dispatchEvent(new InputEvent('input', { bubbles: true }));
-              input.dispatchEvent(new Event('change', { bubbles: true }));
-            }, { selectors: [page.__titleInputSelector, '[data-placeholder*="タイトル" i] textarea', 'textarea'], value: title });
-
-            console.log(`✅ Title set via selector: ${page.__titleInputSelector}`);
+            console.log('📝 Setting title...');
+            await page.fill('textarea[placeholder*="タイトル"]', title);
+            console.log('✅ Title set');
 
             // 本文設定
+            console.log('📝 Setting body...');
             const bodyBox = page.locator('div[contenteditable="true"][role="textbox"]').first();
-            await bodyBox.waitFor({ state: 'visible' });
-            await bodyBox.click();
+            await bodyBox.waitFor({ state: 'visible', timeout: 10000 });
+            
+            // 要素にフォーカスを当てる（クリックの代わりに直接フォーカス）
+            await bodyBox.evaluate(el => {
+              el.focus();
+              // カーソルを末尾に移動
+              const range = document.createRange();
+              const sel = window.getSelection();
+              range.selectNodeContents(el);
+              range.collapse(false);
+              sel.removeAllRanges();
+              sel.addRange(range);
+            });
 
             // 画像を含まない場合は、Markdown全体を一括でクリップボード経由でペースト
             if (images.length === 0) {
