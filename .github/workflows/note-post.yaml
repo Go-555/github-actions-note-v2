@@ -511,23 +511,25 @@ jobs:
                 if (part.type === 'text' && part.content.trim()) {
                   console.log(`   Text part length: ${part.content.length} characters`);
                   
+                  // URL単独行の後に改行を追加してリンクカード化を促す
+                  // 例: "https://example.com" → "https://example.com\n"
+                  const processedText = part.content.replace(/^(https?:\/\/[^\s]+)$/gm, '$1\n');
+                  
+                  const urlCount = (part.content.match(/^https?:\/\/[^\s]+$/gm) || []).length;
+                  if (urlCount > 0) {
+                    console.log(`   ℹ️  Found ${urlCount} URL line(s), added line breaks for link card expansion`);
+                  }
+                  
                   // テキストをクリップボード経由で挿入
                   await page.evaluate(async (text) => {
                     await navigator.clipboard.writeText(text);
-                  }, part.content);
+                  }, processedText);
                   await page.keyboard.press('Control+V');
                   await page.waitForTimeout(300);
                   
-                  // テキストの最後の行がURLかどうか確認
-                  const lines = part.content.trim().split('\n');
-                  const lastLine = lines[lines.length - 1].trim();
-                  const endsWithUrl = /^https?:\/\/[^\s]+$/.test(lastLine);
-                  
-                  if (endsWithUrl) {
-                    // URL単独行で終わる場合、追加でEnterを押してリンクカード化
-                    await page.keyboard.press('Enter');
-                    await page.waitForTimeout(800); // リンクカード展開を待つ
-                    console.log(`   ℹ️  URL detected, pressed Enter for link card`);
+                  // URL後の追加待機（リンクカード展開用）
+                  if (urlCount > 0) {
+                    await page.waitForTimeout(urlCount * 800); // URL数に応じて待機
                   }
                   
                   console.log(`   ✅ Text pasted`);
