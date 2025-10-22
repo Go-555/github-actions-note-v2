@@ -397,9 +397,35 @@ jobs:
 
             // タイトル設定
             console.log('📝 Setting title...');
+            console.log(`   Target title: "${title}"`);
             await page.waitForTimeout(500);
+            
             const titleField = page.locator('textarea[placeholder*="タイトル"]').first();
+            
+            // タイトル入力前の値を確認
+            const beforeValue = await titleField.inputValue();
+            console.log(`   Before fill: "${beforeValue}"`);
+            
+            // 方法1: fillを試す
             await titleField.fill(title);
+            await page.waitForTimeout(300);
+            
+            // 入力後の値を確認
+            const afterFillValue = await titleField.inputValue();
+            console.log(`   After fill: "${afterFillValue}"`);
+            
+            // fillが失敗している場合、キーボード入力にフォールバック
+            if (afterFillValue !== title) {
+              console.log('   ℹ️  fill() did not work, trying keyboard input...');
+              await titleField.click();
+              await titleField.clear();
+              await page.keyboard.type(title);
+              await page.waitForTimeout(300);
+              
+              const afterTypeValue = await titleField.inputValue();
+              console.log(`   After keyboard type: "${afterTypeValue}"`);
+            }
+            
             console.log('✅ Title set');
 
             // 本文設定
@@ -427,11 +453,26 @@ jobs:
             // 画像を含まない場合は、Markdown全体を一括でクリップボード経由でペースト
             if (images.length === 0) {
               console.log('📋 Pasting entire content via clipboard...');
+              console.log(`   Content length: ${body.length} characters`);
+              
+              // クリップボードに書き込む
               await page.evaluate(async (text) => {
                 await navigator.clipboard.writeText(text);
               }, body);
+              
+              // 本文エリアがフォーカスされているか確認
+              const isFocused = await bodyBox.evaluate(el => {
+                return document.activeElement === el;
+              });
+              console.log(`   Body box focused: ${isFocused}`);
+              
+              // ペースト
               await page.keyboard.press('Control+V');
               await page.waitForTimeout(1000);
+              
+              // ペースト後の内容を確認
+              const afterContent = await bodyBox.textContent();
+              console.log(`   After paste length: ${afterContent.length} characters`);
               console.log('✅ Content pasted');
             } else {
               // 画像がある場合は、画像マーカーで分割して処理
@@ -463,14 +504,19 @@ jobs:
               }
               
               // 各パートを順番に挿入
-              for (const part of parts) {
+              for (let i = 0; i < parts.length; i++) {
+                const part = parts[i];
+                console.log(`   Processing part ${i+1}/${parts.length}: type=${part.type}`);
+                
                 if (part.type === 'text' && part.content.trim()) {
+                  console.log(`   Text part length: ${part.content.length} characters`);
                   // テキストをクリップボード経由で挿入
                   await page.evaluate(async (text) => {
                     await navigator.clipboard.writeText(text);
                   }, part.content);
                   await page.keyboard.press('Control+V');
                   await page.waitForTimeout(300);
+                  console.log(`   ✅ Text pasted`);
                 } else if (part.type === 'image' && fs.existsSync(part.image.absolutePath)) {
                   console.log(`  📸 Uploading image: ${part.image.localPath}`);
                   
