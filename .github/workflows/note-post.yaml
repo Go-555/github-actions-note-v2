@@ -511,7 +511,7 @@ jobs:
                 if (part.type === 'text' && part.content.trim()) {
                   console.log(`   Text part length: ${part.content.length} characters`);
                   
-                  // 1行ずつクリップボード貼り付けで処理
+                  // 参考コードと同じく1行ずつキーボード入力で処理
                   const lines = part.content.split('\n');
                   let urlCount = 0;
                   
@@ -520,20 +520,8 @@ jobs:
                     const isLastLine = lineIdx === lines.length - 1;
                     const isUrlLine = /^https?:\/\/[^\s]+$/.test(line.trim());
                     
-                    // 行をクリップボード経由で貼り付け
-                    if (line.trim() || !isLastLine) {
-                      await page.evaluate(async (text) => {
-                        await navigator.clipboard.writeText(text);
-                      }, line);
-                      await page.keyboard.press('Control+V');
-                      await page.waitForTimeout(50);
-                    }
-                    
-                    // 改行（最後の行以外）
-                    if (!isLastLine) {
-                      await page.keyboard.press('Enter');
-                      await page.waitForTimeout(50);
-                    }
+                    // 行をキーボード入力
+                    await page.keyboard.type(line);
                     
                     // URL行の場合、追加でEnterを押してリンクカード化
                     if (isUrlLine) {
@@ -541,12 +529,17 @@ jobs:
                       await page.waitForTimeout(1200); // リンクカード展開を待つ
                       urlCount++;
                     }
+                    
+                    // 改行（最後の行以外、またはURL行の場合は既にEnterを押しているのでスキップ）
+                    if (!isLastLine && !isUrlLine) {
+                      await page.keyboard.press('Enter');
+                    }
                   }
                   
                   if (urlCount > 0) {
                     console.log(`   ℹ️  Processed ${urlCount} URL line(s) with Enter for link cards`);
                   }
-                  console.log(`   ✅ Text pasted`);
+                  console.log(`   ✅ Text typed`);
                 } else if (part.type === 'image' && fs.existsSync(part.image.absolutePath)) {
                   console.log(`  📸 Uploading image: ${part.image.localPath}`);
                   
