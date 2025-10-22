@@ -521,8 +521,8 @@ jobs:
                     const isUrlLine = /^https?:\/\/[^\s]+$/.test(line.trim());
                     
                     if (isUrlLine) {
-                      // バッファにあるテキストを先に貼り付け
-                      if (buffer.trim()) {
+                      // バッファにあるテキストを先に貼り付け（空行も保持）
+                      if (buffer) {
                         await page.evaluate(async (text) => {
                           await navigator.clipboard.writeText(text);
                         }, buffer);
@@ -540,17 +540,17 @@ jobs:
                       
                       // Enterでリンクカード化
                       await page.keyboard.press('Enter');
-                      await page.waitForTimeout(800); // リンクカード展開を待つ
+                      await page.waitForTimeout(1200); // リンクカード展開をしっかり待つ
                       urlCount++;
                       
                     } else {
-                      // 通常行はバッファに追加
+                      // 通常行はバッファに追加（改行も保持）
                       buffer += line + (lineIdx < lines.length - 1 ? '\n' : '');
                     }
                   }
                   
-                  // 残りのバッファを貼り付け
-                  if (buffer.trim()) {
+                  // 残りのバッファを貼り付け（空でなければ）
+                  if (buffer) {
                     await page.evaluate(async (text) => {
                       await navigator.clipboard.writeText(text);
                     }, buffer);
